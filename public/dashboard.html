@@ -70,6 +70,31 @@
       .cost {
         color: #ef4444;
       }
+      .chart-controls {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 10px;
+        align-items: center;
+      }
+      .sort-control {
+        margin-left: 10px;
+      }
+      select {
+        padding: 6px;
+        border-radius: 4px;
+        border: 1px solid #ddd;
+      }
+      button {
+        padding: 6px 12px;
+        background-color: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #1d4ed8;
+      }
     </style>
   </head>
   <body>
@@ -119,6 +144,25 @@
         </div>
         <div class="chart-card chart-container">
           <h3>Configuration Comparison</h3>
+          <div class="chart-controls">
+            <div class="sort-control">
+              <label for="sort-by">Sort by:</label>
+              <select id="sort-by">
+                <option value="avgTime">Execution Time</option>
+                <option value="avgCost">Cost</option>
+              </select>
+            </div>
+            <div class="sort-control">
+              <label for="sort-order">Order:</label>
+              <select id="sort-order">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </div>
+            <div class="sort-control">
+              <button id="apply-sort">Apply Sort</button>
+            </div>
+          </div>
           <canvas id="config-chart"></canvas>
         </div>
       </div>
@@ -222,6 +266,48 @@
         },
       });
 
+      // Store the current configuration comparison data
+      let configComparisonData = [];
+
+      // Set up sorting controls
+      document
+        .getElementById("apply-sort")
+        .addEventListener("click", sortConfigChart);
+
+      function sortConfigChart() {
+        const sortBy = document.getElementById("sort-by").value;
+        const sortOrder = document.getElementById("sort-order").value;
+
+        // Sort the data
+        configComparisonData.sort((a, b) => {
+          let comparison = 0;
+
+          if (sortBy === "name") {
+            comparison = a.name.localeCompare(b.name);
+          } else if (sortBy === "avgTime") {
+            comparison = a.avgTime - b.avgTime;
+          } else if (sortBy === "avgCost") {
+            comparison = a.avgCost - b.avgCost;
+          }
+
+          return sortOrder === "asc" ? comparison : -comparison;
+        });
+
+        // Update the chart with sorted data
+        updateConfigChart(configComparisonData);
+      }
+
+      function updateConfigChart(configComparison) {
+        configChart.data.labels = configComparison.map((item) => item.name);
+        configChart.data.datasets[0].data = configComparison.map(
+          (item) => item.avgTime
+        );
+        configChart.data.datasets[1].data = configComparison.map(
+          (item) => item.avgCost
+        );
+        configChart.update();
+      }
+
       // Function to update dashboard with latest data
       async function updateDashboard() {
         try {
@@ -293,21 +379,23 @@
           });
 
           // Calculate averages
-          const configComparison = Object.values(configMap).map((config) => ({
+          configComparisonData = Object.values(configMap).map((config) => ({
             name: config.name,
             avgTime: parseFloat((config.avgTime / config.count).toFixed(2)),
             avgCost: parseFloat((config.avgCost / config.count).toFixed(8)),
           }));
 
-          // Update config comparison chart
-          configChart.data.labels = configComparison.map((item) => item.name);
-          configChart.data.datasets[0].data = configComparison.map(
-            (item) => item.avgTime
-          );
-          configChart.data.datasets[1].data = configComparison.map(
-            (item) => item.avgCost
-          );
-          configChart.update();
+          // Apply current sort settings
+          const sortBy = document.getElementById("sort-by").value;
+          const sortOrder = document.getElementById("sort-order").value;
+
+          if (sortBy !== "name" || sortOrder !== "asc") {
+            // Only sort if not default sort
+            sortConfigChart();
+          } else {
+            // Default update
+            updateConfigChart(configComparisonData);
+          }
         } catch (error) {
           console.error("Failed to fetch metrics:", error);
         }
