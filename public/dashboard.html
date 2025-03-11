@@ -61,6 +61,9 @@
       .concurrency {
         color: #16a34a;
       }
+      .timeout {
+        color: #f97316;
+      }
       .requests {
         color: #9333ea;
       }
@@ -111,6 +114,8 @@
           <div>Memory Size (MB)</div>
           <div class="metric-value concurrency" id="concurrency">--</div>
           <div>Concurrency</div>
+          <div class="metric-value timeout" id="timeout">--</div>
+          <div>Timeout (seconds)</div>
         </div>
         <div class="metric-card">
           <h3>Total Requests</h3>
@@ -266,10 +271,8 @@
         },
       });
 
-      // Store the current configuration comparison data
       let configComparisonData = [];
 
-      // Set up sorting controls
       document
         .getElementById("apply-sort")
         .addEventListener("click", sortConfigChart);
@@ -278,7 +281,6 @@
         const sortBy = document.getElementById("sort-by").value;
         const sortOrder = document.getElementById("sort-order").value;
 
-        // Sort the data
         configComparisonData.sort((a, b) => {
           let comparison = 0;
 
@@ -293,36 +295,35 @@
           return sortOrder === "asc" ? comparison : -comparison;
         });
 
-        // Update the chart with sorted data
         updateConfigChart(configComparisonData);
       }
 
       function updateConfigChart(configComparison) {
-        configChart.data.labels = configComparison.map((item) => item.name);
-        configChart.data.datasets[0].data = configComparison.map(
+        const limitedData = configComparison.slice(0, 10);
+        configChart.data.labels = limitedData.map((item) => item.name);
+        configChart.data.datasets[0].data = limitedData.map(
           (item) => item.avgTime
         );
-        configChart.data.datasets[1].data = configComparison.map(
+        configChart.data.datasets[1].data = limitedData.map(
           (item) => item.avgCost
         );
         configChart.update();
       }
 
-      // Function to update dashboard with latest data
       async function updateDashboard() {
         try {
           const response = await fetch("/api/metrics");
           const data = await response.json();
 
-          // Update metric cards
           document.getElementById("memory-size").textContent =
             data.currentOptimalConfig.memorySize;
           document.getElementById("concurrency").textContent =
             data.currentOptimalConfig.concurrency;
+          document.getElementById("timeout").textContent =
+            data.currentOptimalConfig.timeout || 30;
           document.getElementById("total-requests").textContent =
             data.totalRequestsProcessed;
 
-          // Get latest performance if available
           if (data.recentPerformance.length > 0) {
             const latest =
               data.recentPerformance[data.recentPerformance.length - 1];
@@ -332,7 +333,6 @@
               latest.cost.toFixed(8);
           }
 
-          // Format time series data for charts
           const timeLabels = data.recentPerformance.map((item, index) => {
             const date = new Date(item.timestamp);
             return date.toLocaleTimeString();
@@ -346,28 +346,28 @@
             (item) => item.memoryUsedMb
           );
 
-          // Update time chart
           timeChart.data.labels = timeLabels;
           timeChart.data.datasets[0].data = executionTimes;
           timeChart.update();
 
-          // Update cost chart
           costChart.data.labels = timeLabels;
           costChart.data.datasets[0].data = costs;
           costChart.update();
 
-          // Update memory chart
           memoryChart.data.labels = timeLabels;
           memoryChart.data.datasets[0].data = memoryUsages;
           memoryChart.update();
 
-          // Group by configuration to show comparison
           const configMap = {};
           data.recentPerformance.forEach((item) => {
-            const key = `${item.memorySize}MB-${item.concurrency}`;
+            const timeout = item.timeout || 30;
+            const key = `${item.memorySize}MB-${item.concurrency}x-${timeout}s`;
             if (!configMap[key]) {
               configMap[key] = {
                 name: key,
+                memorySize: item.memorySize,
+                concurrency: item.concurrency,
+                timeout: timeout,
                 avgTime: 0,
                 avgCost: 0,
                 count: 0,
@@ -378,22 +378,22 @@
             configMap[key].count++;
           });
 
-          // Calculate averages
           configComparisonData = Object.values(configMap).map((config) => ({
             name: config.name,
+            memorySize: config.memorySize,
+            concurrency: config.concurrency,
+            timeout: config.timeout,
             avgTime: parseFloat((config.avgTime / config.count).toFixed(2)),
             avgCost: parseFloat((config.avgCost / config.count).toFixed(8)),
+            count: config.count,
           }));
 
-          // Apply current sort settings
           const sortBy = document.getElementById("sort-by").value;
           const sortOrder = document.getElementById("sort-order").value;
 
           if (sortBy !== "name" || sortOrder !== "asc") {
-            // Only sort if not default sort
             sortConfigChart();
           } else {
-            // Default update
             updateConfigChart(configComparisonData);
           }
         } catch (error) {
@@ -401,10 +401,8 @@
         }
       }
 
-      // Initial update
       updateDashboard();
 
-      // Update every 5 seconds
       setInterval(updateDashboard, 5000);
     </script>
   </body>

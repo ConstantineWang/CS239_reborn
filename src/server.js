@@ -20,9 +20,11 @@ for (let i = 0; i < args.length; i++) {
 
 console.log(`Selected function implementation: ${selectedFunction}`);
 
+// Add timeout to the optimal configuration
 let currentOptimalConfig = {
   memorySize: 256,
   concurrency: 20,
+  timeout: 30, // Default timeout in seconds
 };
 
 const performanceHistory = [];
@@ -37,7 +39,7 @@ try {
     `Loaded existing performance history with ${performanceHistory.length} entries`
   );
   console.log(
-    `Starting with optimal config: Memory ${currentOptimalConfig.memorySize}MB, Concurrency ${currentOptimalConfig.concurrency}`
+    `Starting with optimal config: Memory ${currentOptimalConfig.memorySize}MB, Concurrency ${currentOptimalConfig.concurrency}, Timeout ${currentOptimalConfig.timeout}s`
   );
 } catch (err) {
   console.log("No existing performance history found, starting fresh");
@@ -99,67 +101,104 @@ async function processRequest(name) {
 
   const funcs = require(path.join(__dirname, "functions.js"));
 
-  const m = await faast("aws", funcs, {
-    memorySize: currentOptimalConfig.memorySize,
-    maxConcurrency: currentOptimalConfig.concurrency,
-    env: {
-      SELECTED_FUNCTION: selectedFunction,
-    },
-  });
-
+  let m = null;
   let message;
   let executionTimeMs;
   let memoryUsedMb;
-  let costValue;
-  let costDetails;
-  
+  let costValue = 0;
+  let costDetails = { total: 0, breakdown: {}, csv: null };
+
   try {
+    // Initialize faast module with timeout parameter
+    m = await faast("aws", funcs, {
+      memorySize: currentOptimalConfig.memorySize,
+      maxConcurrency: currentOptimalConfig.concurrency,
+      timeout: currentOptimalConfig.timeout, // Add timeout in seconds
+      env: {
+        SELECTED_FUNCTION: selectedFunction,
+      },
+    });
+
     const { hello } = m.functions;
     message = await hello(name);
-    
+
     const end = process.hrtime.bigint();
     executionTimeMs = Number(end - start) / 1_000_000;
     const memoryUsed = process.memoryUsage().heapUsed - memorySampleStart;
     memoryUsedMb = memoryUsed / 1024 / 1024;
+  } catch (error) {
+    console.error("Error executing function:", error);
+    message = `Error: ${error.message}`;
+
+    // Set default values in case of error
+    executionTimeMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+    memoryUsedMb = 0;
   } finally {
-    // Get cost snapshot inside finally block as recommended in documentation
-    const costSnapshot = await m.costSnapshot();
-    
-    // Fix the cost calculation using total() method from the documentation
-    costValue = costSnapshot.total ? costSnapshot.total() : 0;
-    
-    costDetails = {
-      total: costValue,
-      breakdown: costSnapshot.costMetrics ? 
-        costSnapshot.costMetrics.reduce((acc, metric) => {
-          acc[metric.name] = metric.price;
-          return acc;
-        }, {}) : {},
-      csv: typeof costSnapshot.csv === 'function' ? costSnapshot.csv() : null,
-    };
-    
-    await m.cleanup();
+    if (m) {
+      try {
+        // Get cost snapshot inside finally block as recommended in documentation
+        const costSnapshot = await m.costSnapshot();
+        console.log(
+          "Cost snapshot obtained:",
+          JSON.stringify(costSnapshot, null, 2)
+        );
+
+        // Fix the cost calculation using total() method from the documentation
+        if (costSnapshot) {
+          if (typeof costSnapshot.total === "function") {
+            costValue = costSnapshot.total();
+            console.log("Cost from total() method:", costValue);
+          } else if (costSnapshot.total !== undefined) {
+            costValue = Number(costSnapshot.total);
+            console.log("Cost from total property:", costValue);
+          }
+
+          costDetails = {
+            total: costValue,
+            breakdown: costSnapshot.costMetrics
+              ? costSnapshot.costMetrics.reduce((acc, metric) => {
+                  acc[metric.name] = metric.price;
+                  return acc;
+                }, {})
+              : {},
+            csv:
+              typeof costSnapshot.csv === "function"
+                ? costSnapshot.csv()
+                : null,
+          };
+        }
+      } catch (costError) {
+        console.error("Error getting cost snapshot:", costError);
+      } finally {
+        try {
+          await m.cleanup();
+        } catch (cleanupError) {
+          console.error("Error during cleanup:", cleanupError);
+        }
+      }
+    }
   }
-  
+
   const metrics = {
     timestamp: new Date().toISOString(),
     function: selectedFunction,
     concurrency: currentOptimalConfig.concurrency,
     memorySize: currentOptimalConfig.memorySize,
+    timeout: currentOptimalConfig.timeout,
     executionTimeMs,
     memoryUsedMb,
     cost: costValue,
     message,
     costDetails,
   };
-  
+
   performanceHistory.push(metrics);
-  
+
   if (performanceHistory.length % 10 === 0) {
     updateOptimalConfiguration();
     savePerformanceHistory();
   }
-  
+
   return metrics;
 }
 
@@ -171,7 +210,10 @@ function updateOptimalConfiguration() {
   const configGroups = new Map();
 
   recentMetrics.forEach((metric) => {
-    const configKey = `${metric.memorySize}-${metric.concurrency}`;
+    // Include timeout in the configuration key
+    const configKey = `${metric.memorySize}-${metric.concurrency}-${
+      metric.timeout || 30
+    }`;
     if (!configGroups.has(configKey)) {
       configGroups.set(configKey, []);
     }
@@ -184,20 +226,25 @@ function updateOptimalConfiguration() {
     if (metrics.length < 3) return;
 
     // Filter out NaN costs before calculating average
-    const validCostMetrics = metrics.filter(m => typeof m.cost === 'number' && !isNaN(m.cost));
-    
+    const validCostMetrics = metrics.filter(
+      (m) => typeof m.cost === "number" && !isNaN(m.cost)
+    );
+
     if (validCostMetrics.length < 3) return;
-    
+
     const avgCost =
-      validCostMetrics.reduce((sum, m) => sum + m.cost, 0) / validCostMetrics.length;
+      validCostMetrics.reduce((sum, m) => sum + m.cost, 0) /
+      validCostMetrics.length;
     const avgTime =
       metrics.reduce((sum, m) => sum + m.executionTimeMs, 0) / metrics.length;
 
-    const [memorySize, concurrency] = configKey.split("-").map(Number);
+    // Extract all three configuration parameters from the key
+    const [memorySize, concurrency, timeout] = configKey.split("-").map(Number);
 
     configPerformance.push({
       memorySize,
       concurrency,
+      timeout,
       avgCost,
       avgTime,
       samples: metrics.length,
@@ -212,7 +259,8 @@ function updateOptimalConfiguration() {
     const currentConfigPerf = configPerformance.find(
       (c) =>
         c.memorySize === currentOptimalConfig.memorySize &&
-        c.concurrency === currentOptimalConfig.concurrency
+        c.concurrency === currentOptimalConfig.concurrency &&
+        c.timeout === currentOptimalConfig.timeout
     );
 
     if (
@@ -224,10 +272,11 @@ function updateOptimalConfiguration() {
       currentOptimalConfig = {
         memorySize: optimal.memorySize,
         concurrency: optimal.concurrency,
+        timeout: optimal.timeout,
       };
 
       console.log(
-        `Updated optimal configuration from Memory ${oldConfig.memorySize}MB, Concurrency ${oldConfig.concurrency} to Memory ${currentOptimalConfig.memorySize}MB, Concurrency ${currentOptimalConfig.concurrency}`
+        `Updated optimal configuration from Memory ${oldConfig.memorySize}MB, Concurrency ${oldConfig.concurrency}, Timeout ${oldConfig.timeout}s to Memory ${currentOptimalConfig.memorySize}MB, Concurrency ${currentOptimalConfig.concurrency}, Timeout ${currentOptimalConfig.timeout}s`
       );
       console.log(
         `New avg cost: $${optimal.avgCost.toFixed(
@@ -245,27 +294,32 @@ function updateOptimalConfiguration() {
 }
 
 function exploreNewConfiguration() {
-  const memorySizes = [2, 16, 64, 256];
-  const concurrencyLevels = [1, 5, 10, 30, 100, 1000, 10000];
+  const memorySizes = [1, 16, 128, 1024];
+  const concurrencyLevels = [1, 10, 100, 1000, 10000];
+  const timeoutLevels = [1, 3, 10, 40, 100];
 
-  let newMemory, newConcurrency;
+  let newMemory, newConcurrency, newTimeout;
 
   do {
     newMemory = memorySizes[Math.floor(Math.random() * memorySizes.length)];
     newConcurrency =
       concurrencyLevels[Math.floor(Math.random() * concurrencyLevels.length)];
+    newTimeout =
+      timeoutLevels[Math.floor(Math.random() * timeoutLevels.length)];
   } while (
     newMemory === currentOptimalConfig.memorySize &&
-    newConcurrency === currentOptimalConfig.concurrency
+    newConcurrency === currentOptimalConfig.concurrency &&
+    newTimeout === currentOptimalConfig.timeout
   );
 
   currentOptimalConfig = {
     memorySize: newMemory,
     concurrency: newConcurrency,
+    timeout: newTimeout,
   };
 
   console.log(
-    `Exploring new configuration: Memory ${newMemory}MB, Concurrency ${newConcurrency}`
+    `Exploring new configuration: Memory ${newMemory}MB, Concurrency ${newConcurrency}, Timeout ${newTimeout}s`
   );
 }
 

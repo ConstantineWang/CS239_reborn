@@ -1,5 +1,7 @@
 #!/bin/bash
 
+echo "" > performance_history.json
+
 SERVER_FILE="src/server.js"
 FUNCTION_FILE=""
 PORT=3000

@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 
 const Dashboard = () => {
   const [data, setData] = useState({ 
-    currentOptimalConfig: { memorySize: 0, concurrency: 0 },
+    currentOptimalConfig: { memorySize: 0, concurrency: 0, timeout: 30 },
     recentPerformance: [],
     totalRequestsProcessed: 0
   });
@@ -62,19 +62,24 @@ const Dashboard = () => {
     memoryUsed: parseFloat(item.memoryUsedMb.toFixed(2)),
     cost: parseFloat((item.cost * 1000000).toFixed(2)), // Convert to microseconds for better visibility
     memorySize: item.memorySize,
-    concurrency: item.concurrency
+    concurrency: item.concurrency,
+    timeout: item.timeout || 30 // Default to 30 if not available in older data
   }));
 
-  // Group by configuration to show comparison
+  // Group by configuration to show comparison (now including timeout)
   const configsData = {};
   data.recentPerformance.forEach(item => {
-    const key = `${item.memorySize}MB-${item.concurrency}`;
+    const timeout = item.timeout || 30; // Handle older data without timeout
+    const key = `${item.memorySize}MB-${item.concurrency}x-${timeout}s`;
     if (!configsData[key]) {
       configsData[key] = {
         name: key,
         avgTime: 0,
         avgCost: 0,
-        count: 0
+        count: 0,
+        memorySize: item.memorySize,
+        concurrency: item.concurrency,
+        timeout: timeout
       };
     }
     configsData[key].avgTime += item.executionTimeMs;
@@ -87,7 +92,40 @@ const Dashboard = () => {
     name: config.name,
     avgTime: parseFloat((config.avgTime / config.count).toFixed(2)),
     avgCost: parseFloat(((config.avgCost / config.count) * 1000000).toFixed(2)), // Convert to microseconds
-    count: config.count
+    count: config.count,
+    memorySize: config.memorySize,
+    concurrency: config.concurrency,
+    timeout: config.timeout
+  })).sort((a, b) => a.avgCost - b.avgCost); // Sort by cost for better visualization
+
+  // Create timeout comparison data
+  const timeoutComparison = Object.values(configsData)
+    .filter(config => config.count >= 3) // Only include configs with enough data
+    .reduce((acc, config) => {
+      const memSizeKey = `${config.memorySize}MB`;
+      if (!acc[memSizeKey]) {
+        acc[memSizeKey] = [];
+      }
+      
+      acc[memSizeKey].push({
+        name: `${config.timeout}s`,
+        timeout: config.timeout,
+        avgTime: parseFloat((config.avgTime / config.count).toFixed(2)),
+        avgCost: parseFloat(((config.avgCost / config.count) * 1000000).toFixed(2)),
+        count: config.count
+      });
+      
+      return acc;
+    }, {});
+  
+  // Format timeout comparison for chart
+  const timeoutChartData = Object.entries(timeoutComparison).map(([memSize, data]) => ({
+    name: memSize,
+    ...data.reduce((acc, item) => {
+      acc[`time_${item.timeout}`] = item.avgTime;
+      acc[`cost_${item.timeout}`] = item.avgCost;
+      return acc;
+    }, {})
   }));
 
   return (
@@ -105,6 +143,10 @@ const Dashboard = () => {
             {data.currentOptimalConfig.concurrency}
           </div>
           <div className="text-gray-500">Concurrency</div>
+          <div className="text-4xl font-bold text-orange-600 mt-4">
+            {data.currentOptimalConfig.timeout || 30}s
+          </div>
+          <div className="text-gray-500">Timeout</div>
         </div>
         
         <div className="bg-white p-6 rounded-lg shadow">
@@ -178,9 +220,9 @@ const Dashboard = () => {
         <div className="bg-white p-6 rounded-lg shadow">
           <h2 className="text-xl font-semibold mb-4">Configuration Comparison</h2>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={configComparison}>
+            <BarChart data={configComparison.slice(0, 10)}> {/* Show only top 10 for readability */}
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
+              <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
               <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
               <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
               <Tooltip />
@@ -189,6 +231,69 @@ const Dashboard = () => {
               <Bar yAxisId="right" dataKey="avgCost" fill="#82ca9d" name="Avg Cost (millionths of $)" />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+        
+        <div className="bg-white p-6 rounded-lg shadow col-span-1 lg:col-span-2">
+          <h2 className="text-xl font-semibold mb-4">Timeout Impact Analysis</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-lg font-medium mb-2">Top 5 Configurations by Cost</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full bg-white">
+                  <thead>
+                    <tr>
+                      <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Config</th>
+                      <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Memory</th>
+                      <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Concurrency</th>
+                      <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Timeout</th>
+                      <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Avg Time</th>
+                      <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Avg Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {configComparison.slice(0, 5).map((config, idx) => (
+                      <tr key={idx} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                        <td className="py-2 px-4 border-b border-gray-200 text-sm">{config.name}</td>
+                        <td className="py-2 px-4 border-b border-gray-200 text-sm">{config.memorySize}MB</td>
+                        <td className="py-2 px-4 border-b border-gray-200 text-sm">{config.concurrency}</td>
+                        <td className="py-2 px-4 border-b border-gray-200 text-sm">{config.timeout}s</td>
+                        <td className="py-2 px-4 border-b border-gray-200 text-sm">{config.avgTime.toFixed(2)}ms</td>
+                        <td className="py-2 px-4 border-b border-gray-200 text-sm">${(config.avgCost / 1000000).toFixed(8)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div>
+              <h3 className="text-lg font-medium mb-2">Timeout Distribution</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart 
+                  data={Object.values(configsData)
+                    .reduce((acc, item) => {
+                      const existing = acc.find(x => x.timeout === item.timeout);
+                      if (existing) {
+                        existing.count += item.count;
+                      } else {
+                        acc.push({ timeout: item.timeout, count: item.count });
+                      }
+                      return acc;
+                    }, [])
+                    .sort((a, b) => a.timeout - b.timeout)
+                  }
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="timeout" 
+                         tickFormatter={(value) => `${value}s`} />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="count" fill="#8884d8" name="Request Count" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       </div>
     </div>
