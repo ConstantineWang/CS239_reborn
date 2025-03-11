@@ -22,9 +22,9 @@ console.log(`Selected function implementation: ${selectedFunction}`);
 
 // Add timeout to the optimal configuration
 let currentOptimalConfig = {
-  memorySize: 256,
-  concurrency: 20,
-  timeout: 30, // Default timeout in seconds
+  memorySize: 2048,
+  concurrency: 1000,
+  timeout: 100, // Default timeout in seconds
 };
 
 const performanceHistory = [];
@@ -294,9 +294,9 @@ function updateOptimalConfiguration() {
 }
 
 function exploreNewConfiguration() {
-  const memorySizes = [1, 16, 128, 1024];
-  const concurrencyLevels = [1, 10, 100, 1000, 10000];
-  const timeoutLevels = [1, 3, 10, 40, 100];
+  const memorySizes = [128, 512, 2048, 10240];
+  const concurrencyLevels = [1, 10, 100, 1000];
+  const timeoutLevels = [1, 3, 10, 100];
 
   let newMemory, newConcurrency, newTimeout;
 
