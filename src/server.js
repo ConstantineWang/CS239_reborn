@@ -50,23 +50,37 @@ app.get("/test/:name", async (req, res) => {
 
   try {
     const result = await processRequest(name);
+
+    // Send the response
     res.json({
       message: result.message,
       executionTimeMs: result.executionTimeMs,
       memoryUsedMb: result.memoryUsedMb,
       estimatedCost: result.cost,
-      costBreakdown: result.costBreakdown,
+      costDetails: result.costDetails,
       function: selectedFunction,
     });
 
+    // Log after sending the response to avoid any potential issues
     console.log(
       `${selectedFunction} request processed: ${result.executionTimeMs.toFixed(
         2
-      )}ms, ${result.memoryUsedMb.toFixed(2)}MB, $${result.cost.toFixed(8)}`
+      )}ms, ${result.memoryUsedMb.toFixed(2)}MB, $${
+        typeof result.cost === "number"
+          ? result.cost.toFixed(8)
+          : "(cost data unavailable)"
+      }`
     );
   } catch (error) {
     console.error("Error processing request:", error);
-    res.status(500).json({ error: "Failed to process request" });
+
+    // Check if headers are not already sent
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Failed to process request",
+        message: error.message,
+      });
+    }
   }
 });
 
@@ -83,13 +97,11 @@ async function processRequest(name) {
   const start = process.hrtime.bigint();
   const memorySampleStart = process.memoryUsage().heapUsed;
 
-  // Use path.join to handle the path properly
   const funcs = require(path.join(__dirname, "functions.js"));
 
-  const m = await faast("aws", funcs, {
+  const m = await faast("local", funcs, {
     memorySize: currentOptimalConfig.memorySize,
     maxConcurrency: currentOptimalConfig.concurrency,
-    // Pass function name as an environment variable
     env: {
       SELECTED_FUNCTION: selectedFunction,
     },
@@ -104,9 +116,8 @@ async function processRequest(name) {
     const memoryUsed = process.memoryUsage().heapUsed - memorySampleStart;
     const memoryUsedMb = memoryUsed / 1024 / 1024;
 
-    // Get cost using faast.js's cost snapshot instead of manual calculation
     const costSnapshot = await m.costSnapshot();
-    const cost = costSnapshot.total;
+    const costValue = Number(costSnapshot.total || 0);
 
     const metrics = {
       timestamp: new Date().toISOString(),
@@ -115,10 +126,13 @@ async function processRequest(name) {
       memorySize: currentOptimalConfig.memorySize,
       executionTimeMs,
       memoryUsedMb,
-      cost,
+      cost: costValue,
       message,
-      // Add detailed cost breakdown
-      costBreakdown: costSnapshot.services,
+      costDetails: {
+        total: costValue,
+        breakdown: costSnapshot.services || {},
+        csv: costSnapshot.csv ? costSnapshot.csv() : null,
+      },
     };
 
     performanceHistory.push(metrics);
@@ -133,9 +147,6 @@ async function processRequest(name) {
     await m.cleanup();
   }
 }
-
-// Remove the manual estimateLambdaCost function since we're using costSnapshot now
-// function estimateLambdaCost(executionTimeMs, configuredMemoryMb, actualMemoryMb) { ... }
 
 function updateOptimalConfiguration() {
   if (performanceHistory.length < 5) return;
