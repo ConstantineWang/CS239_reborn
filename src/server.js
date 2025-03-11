@@ -22,7 +22,7 @@ console.log(`Selected function implementation: ${selectedFunction}`);
 
 // Add timeout to the optimal configuration
 let currentOptimalConfig = {
-  memorySize: 2048,
+  memorySize: 3007,
   concurrency: 1000,
   timeout: 100, // Default timeout in seconds
 };
@@ -110,7 +110,7 @@ async function processRequest(name) {
 
   try {
     // Initialize faast module with timeout parameter
-    m = await faast("local", funcs, {
+    m = await faast("aws", funcs, {
       memorySize: currentOptimalConfig.memorySize,
       maxConcurrency: currentOptimalConfig.concurrency,
       timeout: currentOptimalConfig.timeout, // Add timeout in seconds
@@ -194,7 +194,7 @@ async function processRequest(name) {
 
   performanceHistory.push(metrics);
 
-  if (performanceHistory.length % 5 === 0) {
+  if (performanceHistory.length % 3 === 0) {
     updateOptimalConfiguration();
     savePerformanceHistory();
   }
@@ -288,7 +288,7 @@ function updateOptimalConfiguration() {
     }
   }
 
-  if (performanceHistory.length % 3 === 0) {
+  if (performanceHistory.length % 9 === 0) {
     exploreNewConfiguration();
   }
 }
