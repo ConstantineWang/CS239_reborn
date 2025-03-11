@@ -217,28 +217,7 @@
         },
       });
 
-      const memoryChart = new Chart(document.getElementById("memory-chart"), {
-        type: "line",
-        data: {
-          labels: [],
-          datasets: [
-            {
-              label: "Memory Used (MB)",
-              data: [],
-              borderColor: "#ff7300",
-              tension: 0.1,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          scales: {
-            y: {
-              beginAtZero: true,
-            },
-          },
-        },
-      });
+      // Memory chart removed
 
       const configChart = new Chart(document.getElementById("config-chart"), {
         type: "bar",
@@ -338,10 +317,6 @@
             (item) => item.executionTimeMs
           );
           const costs = data.recentPerformance.map((item) => item.cost);
-          const memoryUsages = data.recentPerformance.map(
-            (item) => item.memoryUsedMb
-          );
-
           timeChart.data.labels = timeLabels;
           timeChart.data.datasets[0].data = executionTimes;
           timeChart.update();
@@ -349,10 +324,6 @@
           costChart.data.labels = timeLabels;
           costChart.data.datasets[0].data = costs;
           costChart.update();
-
-          memoryChart.data.labels = timeLabels;
-          memoryChart.data.datasets[0].data = memoryUsages;
-          memoryChart.update();
 
           const configMap = {};
           data.recentPerformance.forEach((item) => {
