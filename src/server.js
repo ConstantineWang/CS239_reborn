@@ -294,7 +294,7 @@ function updateOptimalConfiguration() {
 }
 
 function exploreNewConfiguration() {
-  const memorySizes = [128, 512, 2048, 10240];
+  const memorySizes = [128, 512, 1024, 3007];
   const concurrencyLevels = [1, 10, 100, 1000];
   const timeoutLevels = [1, 3, 10, 100];
 
