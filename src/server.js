@@ -66,7 +66,7 @@ app.get("/test/:name", async (req, res) => {
       `${selectedFunction} request processed: ${result.executionTimeMs.toFixed(
         2
       )}ms, ${result.memoryUsedMb.toFixed(2)}MB, $${
-        typeof result.cost === "number"
+        typeof result.cost === "number" && !isNaN(result.cost)
           ? result.cost.toFixed(8)
           : "(cost data unavailable)"
       }`
@@ -99,7 +99,7 @@ async function processRequest(name) {
 
   const funcs = require(path.join(__dirname, "functions.js"));
 
-  const m = await faast("local", funcs, {
+  const m = await faast("aws", funcs, {
     memorySize: currentOptimalConfig.memorySize,
     maxConcurrency: currentOptimalConfig.concurrency,
     env: {
@@ -107,45 +107,60 @@ async function processRequest(name) {
     },
   });
 
+  let message;
+  let executionTimeMs;
+  let memoryUsedMb;
+  let costValue;
+  let costDetails;
+  
   try {
     const { hello } = m.functions;
-    const message = await hello(name);
-
+    message = await hello(name);
+    
     const end = process.hrtime.bigint();
-    const executionTimeMs = Number(end - start) / 1_000_000;
+    executionTimeMs = Number(end - start) / 1_000_000;
     const memoryUsed = process.memoryUsage().heapUsed - memorySampleStart;
-    const memoryUsedMb = memoryUsed / 1024 / 1024;
-
-    const costSnapshot = await m.costSnapshot();
-    const costValue = Number(costSnapshot.total || 0);
-
-    const metrics = {
-      timestamp: new Date().toISOString(),
-      function: selectedFunction,
-      concurrency: currentOptimalConfig.concurrency,
-      memorySize: currentOptimalConfig.memorySize,
-      executionTimeMs,
-      memoryUsedMb,
-      cost: costValue,
-      message,
-      costDetails: {
-        total: costValue,
-        breakdown: costSnapshot.services || {},
-        csv: costSnapshot.csv ? costSnapshot.csv() : null,
-      },
-    };
-
-    performanceHistory.push(metrics);
-
-    if (performanceHistory.length % 10 === 0) {
-      updateOptimalConfiguration();
-      savePerformanceHistory();
-    }
-
-    return metrics;
+    memoryUsedMb = memoryUsed / 1024 / 1024;
   } finally {
+    // Get cost snapshot inside finally block as recommended in documentation
+    const costSnapshot = await m.costSnapshot();
+    
+    // Fix the cost calculation using total() method from the documentation
+    costValue = costSnapshot.total ? costSnapshot.total() : 0;
+    
+    costDetails = {
+      total: costValue,
+      breakdown: costSnapshot.costMetrics ? 
+        costSnapshot.costMetrics.reduce((acc, metric) => {
+          acc[metric.name] = metric.price;
+          return acc;
+        }, {}) : {},
+      csv: typeof costSnapshot.csv === 'function' ? costSnapshot.csv() : null,
+    };
+    
     await m.cleanup();
   }
+  
+  const metrics = {
+    timestamp: new Date().toISOString(),
+    function: selectedFunction,
+    concurrency: currentOptimalConfig.concurrency,
+    memorySize: currentOptimalConfig.memorySize,
+    executionTimeMs,
+    memoryUsedMb,
+    cost: costValue,
+    message,
+    costDetails,
+  };
+  
+  performanceHistory.push(metrics);
+  
+  if (performanceHistory.length % 10 === 0) {
+    updateOptimalConfiguration();
+    savePerformanceHistory();
+  }
+  
+  return metrics;
 }
 
 function updateOptimalConfiguration() {
@@ -168,8 +183,13 @@ function updateOptimalConfiguration() {
   configGroups.forEach((metrics, configKey) => {
     if (metrics.length < 3) return;
 
+    // Filter out NaN costs before calculating average
+    const validCostMetrics = metrics.filter(m => typeof m.cost === 'number' && !isNaN(m.cost));
+    
+    if (validCostMetrics.length < 3) return;
+    
     const avgCost =
-      metrics.reduce((sum, m) => sum + m.cost, 0) / metrics.length;
+      validCostMetrics.reduce((sum, m) => sum + m.cost, 0) / validCostMetrics.length;
     const avgTime =
       metrics.reduce((sum, m) => sum + m.executionTimeMs, 0) / metrics.length;
 
