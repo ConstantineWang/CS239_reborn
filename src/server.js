@@ -194,7 +194,7 @@ async function processRequest(name) {
 
   performanceHistory.push(metrics);
 
-  if (performanceHistory.length % 10 === 0) {
+  if (performanceHistory.length % 5 === 0) {
     updateOptimalConfiguration();
     savePerformanceHistory();
   }
@@ -288,7 +288,7 @@ function updateOptimalConfiguration() {
     }
   }
 
-  if (performanceHistory.length % 200 === 0) {
+  if (performanceHistory.length % 3 === 0) {
     exploreNewConfiguration();
   }
 }
