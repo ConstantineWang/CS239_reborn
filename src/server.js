@@ -110,7 +110,7 @@ async function processRequest(name) {
 
   try {
     // Initialize faast module with timeout parameter
-    m = await faast("local", funcs, {
+    m = await faast("aws", funcs, {
       memorySize: currentOptimalConfig.memorySize,
       maxConcurrency: currentOptimalConfig.concurrency,
       timeout: currentOptimalConfig.timeout, // Add timeout in seconds
