@@ -6,6 +6,20 @@ const path = require("path");
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Get command line arguments to check for function-name
+const args = process.argv.slice(2);
+let selectedFunction = "hello"; // Default function
+
+// Parse arguments to find function name
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--function-name" || args[i] === "-fn") {
+    selectedFunction = args[i + 1];
+    break;
+  }
+}
+
+console.log(`Selected function implementation: ${selectedFunction}`);
+
 let currentOptimalConfig = {
   memorySize: 256,
   concurrency: 20,
@@ -31,7 +45,7 @@ try {
 
 app.use(express.json());
 
-app.get("/api/hello/:name", async (req, res) => {
+app.get("/test/:name", async (req, res) => {
   const name = req.params.name || "world";
 
   try {
@@ -41,10 +55,12 @@ app.get("/api/hello/:name", async (req, res) => {
       executionTimeMs: result.executionTimeMs,
       memoryUsedMb: result.memoryUsedMb,
       estimatedCost: result.cost,
+      costBreakdown: result.costBreakdown,
+      function: selectedFunction,
     });
 
     console.log(
-      `Request processed: ${result.executionTimeMs.toFixed(
+      `${selectedFunction} request processed: ${result.executionTimeMs.toFixed(
         2
       )}ms, ${result.memoryUsedMb.toFixed(2)}MB, $${result.cost.toFixed(8)}`
     );
@@ -57,6 +73,7 @@ app.get("/api/hello/:name", async (req, res) => {
 app.get("/api/metrics", (req, res) => {
   res.json({
     currentOptimalConfig,
+    currentFunction: selectedFunction,
     recentPerformance: performanceHistory,
     totalRequestsProcessed: performanceHistory.length,
   });
@@ -66,11 +83,16 @@ async function processRequest(name) {
   const start = process.hrtime.bigint();
   const memorySampleStart = process.memoryUsage().heapUsed;
 
-  const funcs = require("./functions.js");
+  // Use path.join to handle the path properly
+  const funcs = require(path.join(__dirname, "functions.js"));
 
-  const m = await faast("local", funcs, {
+  const m = await faast("aws", funcs, {
     memorySize: currentOptimalConfig.memorySize,
     maxConcurrency: currentOptimalConfig.concurrency,
+    // Pass function name as an environment variable
+    env: {
+      SELECTED_FUNCTION: selectedFunction,
+    },
   });
 
   try {
@@ -82,20 +104,21 @@ async function processRequest(name) {
     const memoryUsed = process.memoryUsage().heapUsed - memorySampleStart;
     const memoryUsedMb = memoryUsed / 1024 / 1024;
 
-    const cost = estimateLambdaCost(
-      executionTimeMs,
-      currentOptimalConfig.memorySize,
-      memoryUsedMb
-    );
+    // Get cost using faast.js's cost snapshot instead of manual calculation
+    const costSnapshot = await m.costSnapshot();
+    const cost = costSnapshot.total;
 
     const metrics = {
       timestamp: new Date().toISOString(),
+      function: selectedFunction,
       concurrency: currentOptimalConfig.concurrency,
       memorySize: currentOptimalConfig.memorySize,
       executionTimeMs,
       memoryUsedMb,
       cost,
       message,
+      // Add detailed cost breakdown
+      costBreakdown: costSnapshot.services,
     };
 
     performanceHistory.push(metrics);
@@ -111,17 +134,8 @@ async function processRequest(name) {
   }
 }
 
-function estimateLambdaCost(
-  executionTimeMs,
-  configuredMemoryMb,
-  actualMemoryMb
-) {
-  const gbSeconds = (configuredMemoryMb / 1024) * (executionTimeMs / 1000);
-
-  const pricePerGbSecond = 0.0000166667;
-
-  return gbSeconds * pricePerGbSecond;
-}
+// Remove the manual estimateLambdaCost function since we're using costSnapshot now
+// function estimateLambdaCost(executionTimeMs, configuredMemoryMb, actualMemoryMb) { ... }
 
 function updateOptimalConfiguration() {
   if (performanceHistory.length < 5) return;

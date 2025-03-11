@@ -1,10 +1,50 @@
 const axios = require("axios");
 
-function hello(name) {
-  return "hello " + name;
+// Get command line arguments
+const args = process.argv.slice(2);
+let functionName = "hello"; // Default function
+
+// Parse arguments to find function name
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--function-name" || args[i] === "-fn") {
+    functionName = args[i + 1];
+    break;
+  }
 }
 
-function fibonacci(n = 500000) {
+// Check for environment variable (needed for faastjs execution)
+if (process.env.SELECTED_FUNCTION) {
+  functionName = process.env.SELECTED_FUNCTION;
+}
+
+// All our functions will be wrapped in this hello function
+// This ensures compatibility with faastjs
+async function hello(input) {
+  console.log(`Using implementation: ${functionName} with input: ${input}`);
+
+  switch (functionName) {
+    case "fibonacci":
+      return fibonacci(input);
+    case "factorial":
+      return factorial(input);
+    case "matrixMultiplication":
+      return matrixMultiplication(input);
+    case "httpRequest":
+      return httpRequest(input);
+    case "countPrime":
+      return countPrime(input);
+    case "deepRecursion":
+      return deepRecursion(input);
+    case "sortLargeArray":
+      return sortLargeArray(input);
+    case "hello":
+    default:
+      return `Hello, ${input}!`;
+  }
+}
+
+function fibonacci(n) {
+  n = parseInt(n) || 30;
   if (n <= 0) return (0).toString();
   if (n === 1) return (1).toString();
   let a = 0,
@@ -12,18 +52,20 @@ function fibonacci(n = 500000) {
   for (let i = 2; i <= n; i++) {
     [a, b] = [b, a + b];
   }
-  return b.toString();
+  return `Fibonacci(${n}) = ${b.toString()}`;
 }
 
-function factorial(n = 500000) {
+function factorial(n) {
+  n = parseInt(n) || 20;
   let result = BigInt(1);
   for (let i = 2; i <= n; i++) {
     result *= BigInt(i);
   }
-  return result.toString().slice(0, 10);
+  return `Factorial(${n}) = ${result.toString()}`;
 }
 
-function matrixMultiplication(size = 2000) {
+function matrixMultiplication(size) {
+  size = parseInt(size) || 100;
   const A = Array.from({ length: size }, () =>
     Array.from({ length: size }, () => Math.random())
   );
@@ -41,18 +83,19 @@ function matrixMultiplication(size = 2000) {
       C[i][j] = sum;
     }
   }
-  return C[0].join(", ");
+  return `Matrix multiplication complete for size ${size}x${size}. First row sample: ${C[0]
+    .slice(0, 3)
+    .join(", ")}...`;
 }
 
-async function httpRequest(
-  url = "https://jsonplaceholder.typicode.com/posts/1"
-) {
+async function httpRequest(url) {
+  url = "https://jsonplaceholder.typicode.com/posts/1";
   try {
     const response = await axios.get(url);
-    return JSON.stringify(response.data);
+    return `API Response: ${JSON.stringify(response.data)}`;
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      return error.message;
+      return `API Error: ${error.message}`;
     } else {
       return "An unknown error occurred";
     }
@@ -67,38 +110,38 @@ const isPrime = (n) => {
   return true;
 };
 
-function countPrime(limit = 50000) {
+function countPrime(limit) {
+  limit = parseInt(limit) || 10000;
   let primeCount = 0;
   for (let i = 2; i <= limit; i++) {
     if (isPrime(i)) {
       primeCount++;
     }
   }
-  return primeCount.toString();
+  return `Found ${primeCount} prime numbers up to ${limit}`;
 }
 
-function deepRecursion(n = 1000) {
+function deepRecursion(n) {
+  n = parseInt(n) || 100;
   if (n <= 1) return "1";
-  return deepRecursion(n - 1);
+  return deepRecursion(n - 1) + "+1";
 }
 
-function sortLargeArray(size = 1_000_000) {
+function sortLargeArray(size) {
+  size = parseInt(size) || 100000;
   const largeArray = [];
   for (let i = 0; i < size; i++) {
     largeArray.push(Math.random());
   }
   largeArray.sort((a, b) => a - b);
-  return `Sorted array with ${size} elements`;
+  return `Sorted array with ${size} elements. First 3 elements: ${largeArray
+    .slice(0, 3)
+    .join(", ")}`;
 }
 
-// Export functions using CommonJS syntax
+console.log(`Selected function implementation: ${functionName}`);
+
+// Export only the hello function, which will dispatch to the selected implementation
 module.exports = {
   hello,
-  fibonacci,
-  factorial,
-  matrixMultiplication,
-  httpRequest,
-  countPrime,
-  deepRecursion,
-  sortLargeArray,
 };
